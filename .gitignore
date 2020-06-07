@@ -348,3 +348,5 @@ MigrationBackup/
 
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
+src/RsaEncrypt.Client/.vscode/launch.json
+src/RsaEncrypt.Client/.vscode/tasks.json
