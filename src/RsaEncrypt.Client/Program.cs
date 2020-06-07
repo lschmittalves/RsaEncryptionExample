@@ -2,6 +2,7 @@
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -13,7 +14,9 @@ namespace RsaEncrypt.Client
 {
     class Program
     {
-        static string SERVER_ENDPOINT = @"http://localhost:5050";
+        static readonly string SERVER_ENDPOINT = @"http://localhost:28288";
+
+        static readonly string publicKeyFile = $"{AppDomain.CurrentDomain.BaseDirectory}\\public-key.json";
         static readonly HttpClient theWebClient = new HttpClient();
         static readonly RSACryptoServiceProvider theCryptoServiceProvider = new RSACryptoServiceProvider(2048);
 
@@ -22,15 +25,25 @@ namespace RsaEncrypt.Client
 
             // control flag to stop the program execution
             var stopExecution = false;
+            var publicKeyAsString = GetClientPublicKey();
 
             // initialize the web client base address
             theWebClient.BaseAddress = new Uri(SERVER_ENDPOINT);
+
+
+            Console.WriteLine("-----------------------------------RSA PUBLIC KEY----------------------------------------------");
+            File.WriteAllText(publicKeyFile, JsonConvert.SerializeObject(new RsaPublicKey(){
+                ClientName = Environment.MachineName,
+                PublicKey = publicKeyAsString
+            }), Encoding.UTF8);
+            Console.WriteLine(new FileInfo(publicKeyFile).FullName);
+            Console.WriteLine("-----------------------------------------------------------------------------------------------");
 
             do
             {
                 try
                 {
-                    Console.WriteLine("Press any key to check for new messages, or write 'exit' to stop the program");
+                    Console.WriteLine("Press ENTER to check for new messages, or write 'exit' to stop the program");
                     var lastInputLine = Console.ReadLine();
                     stopExecution = lastInputLine.ToLower() == "exit";
 
@@ -45,9 +58,6 @@ namespace RsaEncrypt.Client
 
                         // decrypt and print the messages
                         thePendingMessages.ForEach(a => Console.WriteLine($"{a.UpdateDate}->{DecryptMessage(a.Message)}"));
-
-                        // then clear all the messages from the server because the client processed all of them
-                        await ClearAllTheMessages();
                     }
                     else
                     {
@@ -59,6 +69,8 @@ namespace RsaEncrypt.Client
                 {
                     Console.WriteLine($"ERROR -> {ex.Message}");
                 }
+
+                Console.WriteLine("-----------------------------------------------------------------------------------------------");
 
             } while (!stopExecution);
 
@@ -86,35 +98,12 @@ namespace RsaEncrypt.Client
         }
 
         /// <summary>
-        /// Clear all the messages of the client 
-        /// </summary>
-        /// <param name="theEncryptMessage"></param>
-        /// <param name="theHttpResponseCode"></param>
-        /// <returns></returns>
-        private async static Task ClearAllTheMessages()
-        {
-            var theJsonMessage = new
-            {
-                ClientName = Environment.MachineName,
-                Message = EncryptMessage("**CLEAR_MESSAGES**") // generate the clear messages command
-            };
-
-            using (HttpResponseMessage response = await theWebClient.PostAsJsonAsync(@"message/clear", theJsonMessage))
-            {
-                response.EnsureSuccessStatusCode(); // throw a exeption if something is not right on the response
-            }
-        }
-
-        /// <summary>
         /// Encrypt the mssage using the RSA public key
         /// </summary>
         /// <param name="theMessage"></param>
         /// <returns></returns>
-        private static string EncryptMessage(string theMessage)
+        private static string EncryptMessage(string theMessage, string thePublicKeyAsString)
         {
-            var thePublicKey = theCryptoServiceProvider.ExportParameters(false); //get the public key
-            var thePublicKeyAsString = GetKeyString(thePublicKey); // parsing the key in a string
-
             var bytesToEncrypt = Encoding.UTF8.GetBytes(theMessage);// encode the message with UTF8
 
             using (var theRsaEncrypt = new RSACryptoServiceProvider(2048))
@@ -164,8 +153,6 @@ namespace RsaEncrypt.Client
                 }
             }
         }
-
-
         /// <summary>
         /// Serialize the RSA key in a string
         /// </summary>
@@ -181,8 +168,17 @@ namespace RsaEncrypt.Client
             }
         }
 
+        /// <summary>
+        /// Get the client public key
+        /// </summary>
+        /// <returns></returns>
+        public static string GetClientPublicKey()
+        {
+            var thePublicKey = theCryptoServiceProvider.ExportParameters(false); //get the public key
+            var thePublicKeyAsString = GetKeyString(thePublicKey); // parsing the key in a string
 
-
+            return thePublicKeyAsString;
+        }
 
 
         public class RsaMessage
@@ -190,6 +186,12 @@ namespace RsaEncrypt.Client
             public DateTime UpdateDate { get; set; }
             public string ClientName { get; set; }
             public string Message { get; set; }
+        }
+
+        public class RsaPublicKey
+        {
+            public string ClientName { get; set; }
+            public string PublicKey { get; set; }
         }
     }
 }

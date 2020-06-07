@@ -12,8 +12,9 @@ namespace RsaEncrypt.Server.Controllers
     [Route("[controller]")]
     public class MessageController : ControllerBase
     {
-        private readonly IDictionary<string, string> publicKeysByClient;
-        private readonly IDictionary<string, List<RsaMessage>> messagesByClient;
+        private static readonly IDictionary<string, RsaPublicKey> publicKeysByClient = new Dictionary<string, RsaPublicKey>();
+        private static readonly IDictionary<string, List<RsaMessage>> messagesByClient = new Dictionary<string, List<RsaMessage>>();
+
         private readonly ILogger<MessageController> logger;
         private readonly RSACryptoServiceProvider theCryptoServiceProvider;
 
@@ -22,10 +23,6 @@ namespace RsaEncrypt.Server.Controllers
             this.logger = logger;
             this.theCryptoServiceProvider = theCryptoServiceProvider;
 
-            // initialize the dictionary of public keys using the server name and key
-            this.publicKeysByClient = new Dictionary<string, string>() { { Environment.MachineName, GetLocalServerPublicKey() } };
-            this.messagesByClient = new Dictionary<string, List<RsaMessage>>();
-
         }
 
         /// <summary>
@@ -33,13 +30,37 @@ namespace RsaEncrypt.Server.Controllers
         /// </summary>
         /// <param name="theClientName"></param>
         /// <returns></returns>
-        [HttpGet("[controller]/{theClientName}")]
+        [HttpGet("{theClientName}")]
         public IActionResult Get(string theClientName)
         {
+            if (!publicKeysByClient.ContainsKey(theClientName)) // the client is not regiter on the server, so we return an unautorized status code
+                return Unauthorized();
+
             if (messagesByClient.ContainsKey(theClientName))
                 return Ok(messagesByClient[theClientName]);
 
-            return Unauthorized(); // the client is not regiter on the server, so we return an unautorized status code
+            return Ok();
+        }
+
+        /// <summary>
+        /// Receives and store a new public key
+        /// </summary>
+        /// <param name="theMessage"></param>
+        /// <returns></returns>
+        [HttpPost("addkey")]
+        public IActionResult AddPublicKey([FromBody] RsaPublicKey theRsaPublicKey)
+        {
+
+            if (theRsaPublicKey == null)
+                throw new ArgumentNullException(nameof(theRsaPublicKey));
+
+            // initialize the dictionary of public keys using the server name and key
+            if (!publicKeysByClient.ContainsKey(theRsaPublicKey.ClientName))
+                publicKeysByClient.Add(theRsaPublicKey.ClientName, theRsaPublicKey);
+            else
+                publicKeysByClient[theRsaPublicKey.ClientName] = theRsaPublicKey;
+
+            return Ok($"Public Key added to the client {theRsaPublicKey.ClientName}!");
         }
 
 
@@ -48,7 +69,7 @@ namespace RsaEncrypt.Server.Controllers
         /// </summary>
         /// <param name="theMessage"></param>
         /// <returns></returns>
-        [HttpPost("[controller]/add")]
+        [HttpPost("add")]
         public IActionResult AddMessage([FromBody] RsaMessage theMessage)
         {
 
@@ -63,44 +84,13 @@ namespace RsaEncrypt.Server.Controllers
                 messagesByClient.Add(theMessage.ClientName, new List<RsaMessage>());
 
             // now we get the new message and encrypt the message
-            theMessage.Message = EncryptMessage(theMessage.Message, publicKeysByClient[theMessage.ClientName]); // encrypt the message using the pre stored public key
+            theMessage.Message = EncryptMessage(theMessage.Message, publicKeysByClient[theMessage.ClientName].PublicKey); // encrypt the message using the pre stored public key
             theMessage.UpdateDate = DateTime.UtcNow;
 
             // adding the message to the cache list
             messagesByClient[theMessage.ClientName].Add(theMessage);
 
-            return Ok();
-        }
-
-        /// <summary>
-        /// Clear all the messages of a client
-        /// </summary>
-        /// <param name="theMessage"></param>
-        /// <returns></returns>
-        [HttpPost("[controller]/clear")]
-        public IActionResult ClearMessages([FromBody] RsaMessage theMessage)
-        {
-
-            if (theMessage == null)
-                throw new ArgumentNullException(nameof(theMessage));
-
-            if (!publicKeysByClient.ContainsKey(theMessage.ClientName)) // the client is not regiter on the server, so we return an unautorized status code
-                return Unauthorized();
-
-            if (!messagesByClient.ContainsKey(theMessage.ClientName))
-                messagesByClient.Add(theMessage.ClientName, new List<RsaMessage>());
-
-            // we generate a encrypt the command clear using the client public key
-            var theCommandClear = EncryptMessage("**CLEAR_MESSAGES**", publicKeysByClient[theMessage.ClientName]);
-
-            // now we compare the received message with the encryp message, if we have a match means that both messages were generate using the same public key
-
-            if (theCommandClear == theMessage.Message)
-                messagesByClient[theMessage.ClientName].Clear();  // clear all the messages
-            else
-                Unauthorized(); // if not we returnt he unauthorized status code
-
-            return Ok();
+            return Ok($"Message Added to the client {theMessage.ClientName}!");
         }
 
         /// <summary>
@@ -129,31 +119,6 @@ namespace RsaEncrypt.Server.Controllers
             }
         }
 
-        /// <summary>
-        /// Get the server public key
-        /// </summary>
-        /// <returns></returns>
-        public string GetLocalServerPublicKey()
-        {
-            var thePublicKey = theCryptoServiceProvider.ExportParameters(false); //get the public key
-            var thePublicKeyAsString = GetKeyString(thePublicKey); // parsing the key in a string
 
-            return thePublicKeyAsString;
-        }
-
-        /// <summary>
-        /// Serialize the RSA key in a string
-        /// </summary>
-        /// <param name="publicKey"></param>
-        /// <returns></returns>
-        public string GetKeyString(RSAParameters publicKey)
-        {
-            using (var stringWriter = new System.IO.StringWriter())
-            {
-                var xmlSerializer = new System.Xml.Serialization.XmlSerializer(typeof(RSAParameters));
-                xmlSerializer.Serialize(stringWriter, publicKey);
-                return stringWriter.ToString();
-            }
-        }
     }
 }
